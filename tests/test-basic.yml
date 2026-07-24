@@ -1,0 +1,40 @@
+name: Test basic PowerShell script execution
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure PowerShell is available
+        run: |
+          if ! command -v pwsh &>/dev/null; then
+            echo "pwsh not found, installing PowerShell..."
+            PWSH_VER="7.4.1"
+            curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-linux-x64.tar.gz" -o /tmp/pwsh.tar.gz
+            mkdir -p /opt/microsoft/powershell/7
+            tar -xzf /tmp/pwsh.tar.gz -C /opt/microsoft/powershell/7
+            chmod +x /opt/microsoft/powershell/7/pwsh
+            ln -sf /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh
+          fi
+          pwsh --version
+          # Ensure RUNNER_TEMP is set for the action's TEMP env var
+          if [ -z "$RUNNER_TEMP" ]; then
+            mkdir -p /tmp/runner-temp
+            echo "RUNNER_TEMP=/tmp/runner-temp" >> "$GITHUB_ENV"
+          fi
+      - id: action
+        uses: .
+        with:
+          script: |
+            return "hello-world"
+      - name: Assert result output
+        env:
+          ACTUAL: ${{ steps.action.outputs.result }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "hello-world" ]; then
+            echo "FAIL: expected 'hello-world' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"

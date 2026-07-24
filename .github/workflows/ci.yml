@@ -1,0 +1,276 @@
+name: CI
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 10 * * 1" # At 10:00 on Monday.
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2
+      - name: Test with Pester
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion '5.0'
+          Import-Module Pester -MinimumVersion '5.0'
+          Invoke-Pester -CI
+      - name: Invoke action
+        env:
+          TEMP: ${{ runner.temp }}
+        run: |
+          $env:PWSH_SCRIPT_ACTION_TEXT = 'Write-Host "ok"; return "value"'
+          $output = pwsh -file ./action.ps1
+          if ($LASTEXITCODE -ne 0) {
+            $output | Write-Error
+            throw 'pwsh failed'
+          }
+          $diff = Compare-Object @('ok','::set-output name=result::value') $output -CaseSensitive
+          if ($diff) {
+            $diff | Format-Table | Write-Host
+            throw 'Output differed from the expected'
+          }
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2
+      - name: Build module docs
+        run: |
+          ./build-docs.ps1 -Clean
+          if (git status --porcelain) {
+            Write-Host "::error::Documentation isn't up to date"
+            exit 1
+          }
+  self-testing:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2
+
+      # return string result
+      - name: Test that returned result string is not json serialized (act)
+        uses: ./
+        id: test-result-string
+        with:
+          script: return "testmsg"
+      - name: Test that returned result string is not json serialized (assert)
+        env:
+          TEST_RESULT: ${{ steps.test-result-string.outputs.result }}
+        run: |
+          $result = $env:TEST_RESULT
+          if ($result -ne 'testmsg') {
+            Write-Host "::error::Return string test failed: invalid result.`n$result"
+            exit 1
+          }
+
+      # return object result
+      - name: Test that returned result object is json serialized (act)
+        uses: ./
+        id: test-result-object
+        with:
+          script: return [ordered]@{ a = 1; b = "c" }
+      - name: Test that returned result object is json serialized (assert)
+        env:
+          TEST_RESULT: ${{ steps.test-result-object.outputs.result }}
+        run: |
+          $result = $env:TEST_RESULT
+          if ($result -ne '{"a":1,"b":"c"}') {
+            Write-Host "::error::Return object test failed: invalid result.`n$result"
+            exit 1
+          }
+
+      # throw
+      - name: Test that throwing causes action to fail (act)
+        uses: ./
+        id: test-throwing-fails-action
+        continue-on-error: true
+        with:
+          script: 'throw "test error message"'
+      - name: Test that throwing causes action to fail (assert)
+        env:
+          TEST_OUTCOME: ${{ steps.test-throwing-fails-action.outcome }}
+          TEST_ERR_MSG: ${{ steps.test-throwing-fails-action.outputs.error }}
+        run: |
+          $outcome = $env:TEST_OUTCOME
+          if ($outcome -ne 'failure') {
+            Write-Host "::error::Throwing test failed: invalid outcome.`n$outcome"
+            exit 1
+          }
+          $errMsg = $env:TEST_ERR_MSG
+          if ($errMsg -ne 'test error message') {
+            Write-Host "::error::Throwing test failed: invalid error output.`n$errMsg"
+            exit 1
+          }
+
+      # check access to contexts
+      - name: Test that workflow contexts are available
+        uses: ./
+        with:
+          script: |
+            function Test-Value ($expression, $expected) {
+              $actual = Invoke-Expression $expression
+              if ("$actual" -ne $expected) {
+                throw "Failed assertion:'$expression' evaluated to '$actual', expected '$expected'."
+              }
+            }
+            Test-Value '$github.token' '${{ github.token }}'
+            Test-Value '$job.status' '${{ job.status }}'
+            Test-Value '$runner.os' '${{ runner.os }}'
+            Test-Value '$strategy."fail-fast"' '${{ strategy.fail-fast }}'
+            Test-Value '$matrix.os' '${{ matrix.os }}'
+
+      # Get-ActionInput
+      # Get-ActionInput isn't really testable in a script
+      - name: Get-ActionInput test
+        if: "false"
+        uses: ./
+        with:
+          custom-input: "test"
+          script: |
+            $script = Get-ActionInput script
+            if ($script -notlike '$script = Get-ActionInput script*') {
+              throw "Get-ActionInput for 'script' failed.`n$script"
+            }
+            $custom = Get-ActionInput custom-input
+            if ($custom -cne 'test') {
+              throw "Get-ActionInput for 'custom-input' failed.`n$custom"
+            }
+
+      # Set-ActionOutput
+      # Set-ActionOutput is tested by virtue of setting 'result' and 'error' outputs
+      - name: Set-ActionOutput test (act)
+        if: "false"
+        uses: ./
+        id: Set-ActionOutput
+        with:
+          script: Set-ActionOutput test-output 'test-value'
+      - name: Set-ActionOutput test (assert)
+        if: "false"
+        uses: ./
+        with:
+          script: |
+            $output = '${{ steps.Set-ActionOutput.outputs.test-output }}'
+            if ($output -cne 'test-value') {
+              throw "Set-ActionOutput failed.`n$output"
+            }
+
+      # Add-ActionPath
+      - name: Add-ActionPath test (act)
+        uses: ./
+        with:
+          script: Add-ActionPath 'testing add-path'
+      - name: Add-ActionPath test (assert)
+        uses: ./
+        with:
+          script: |
+            if ($env:PATH -notlike "*testing add-path$([System.IO.Path]::PathSeparator)*") {
+              throw "Add-ActionPath failed.`n$env:PATH"
+            }
+
+      # Add-ActionSecret
+      - name: Add-ActionSecret test (manual check whether host-sent value is masked)
+        uses: ./
+        with:
+          script: |
+            $secret = [System.Guid]::NewGuid()
+            Add-ActionSecret $secret
+            Write-Host $secret
+
+      # Set-ActionVariable
+      - name: Set-ActionVariable test (act and first assert)
+        uses: ./
+        with:
+          script: |
+            $props = [ordered]@{ a = 1; b = 'c' }
+            Set-ActionVariable testvar $props
+            if ($env:testvar -ne '{"a":1,"b":"c"}') {
+              throw "Set-ActionVariable failed.`n$env:testvar"
+            }
+      - name: Set-ActionVariable test (second assert)
+        uses: ./
+        with:
+          script: |
+            if ($env:testvar -ne '{"a":1,"b":"c"}') {
+              throw "Set-ActionVariable failed.`n$env:testvar"
+            }
+
+      # Set-ActionCommandEcho
+      - name: Set-ActionCommandEcho test (manual check whether commands are shown in log)
+        uses: ./
+        with:
+          script: |
+            Set-ActionCommandEcho $false
+            Set-ActionVariable echovar echo-off # shouldn't show up in logs
+            Set-ActionCommandEcho $true
+            Set-ActionVariable echovar echo-on # should show up in logs
+            Set-ActionCommandEcho $false
+
+      # Set-ActionFailed
+      - name: Set-ActionFailed test (act)
+        uses: ./
+        id: Set-ActionFailed
+        continue-on-error: true
+        with:
+          script: |
+            Set-ActionFailed "test error"
+      - name: Set-ActionFailed test (assert)
+        env:
+          SET_ACTION_FAILED_OUTCOME: ${{ steps.Set-ActionFailed.outcome }}
+        uses: ./
+        with:
+          script: |
+            $result = $env:SET_ACTION_FAILED_OUTCOME
+            if ($result -ne 'failure') {
+              throw "Set-ActionFailed failed.`n$result"
+            }
+
+      # Get-ActionIsDebug
+      - name: Get-ActionIsDebug test
+        uses: ./
+        with:
+          script: |
+            $result = Get-ActionIsDebug
+            if ($result -ne ($env:RUNNER_DEBUG -eq '1')) {
+              throw "Get-ActionIsDebug failed.`n$result"
+            }
+
+      # Invoke-ActionNoCommandsBlock
+      - name: Invoke-ActionNoCommandsBlock test (act)
+        uses: ./
+        with:
+          script: |
+            Invoke-ActionNoCommandsBlock -GenerateToken {
+              Set-ActionVariable nocmdvar nocmd
+            }
+      - name: Invoke-ActionNoCommandsBlock test (assert)
+        uses: ./
+        with:
+          script: |
+            if ($env:nocmdvar -ne $null) {
+              throw "Invoke-ActionNoCommandsBlock failed.`n$env:nocmdvar"
+            }
+
+      # Write-Action -Debug, -Info, -Warning, -Error and Grouping are not testable in any sensible manner
+      - name: Write-Action... and Group... sample runs (manual check)
+        uses: ./
+        continue-on-error: true # since we're printing errors
+        with:
+          script: |
+            Enter-ActionOutputGroup 'testing log levels'
+            Write-ActionDebug "dbg msg"
+            Write-ActionInfo "info msg"
+            Write-ActionWarning "wrn msg"
+            Write-ActionError "err msg"
+            Exit-ActionOutputGroup
+            Invoke-ActionGroup "Invoke-ActionGroup group" {
+              Write-Host "output within Invoke-ActionGroup"
+            }

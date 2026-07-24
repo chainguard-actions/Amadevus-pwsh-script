@@ -1,0 +1,53 @@
+name: Test GitHub context is available in PowerShell script
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure PowerShell is available
+        run: |
+          if ! command -v pwsh &>/dev/null; then
+            echo "pwsh not found, installing PowerShell..."
+            PWSH_VER="7.4.1"
+            curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-linux-x64.tar.gz" -o /tmp/pwsh.tar.gz
+            mkdir -p /opt/microsoft/powershell/7
+            tar -xzf /tmp/pwsh.tar.gz -C /opt/microsoft/powershell/7
+            chmod +x /opt/microsoft/powershell/7/pwsh
+            ln -sf /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh
+          fi
+          pwsh --version
+          # Ensure RUNNER_TEMP is set for the action's TEMP env var
+          if [ -z "$RUNNER_TEMP" ]; then
+            mkdir -p /tmp/runner-temp
+            echo "RUNNER_TEMP=/tmp/runner-temp" >> "$GITHUB_ENV"
+          fi
+      - id: action
+        uses: .
+        with:
+          script: |
+            # Verify $github context object is hydrated
+            if ($null -eq $github) {
+              throw "github context is null"
+            }
+            if ([string]::IsNullOrEmpty($github.repository)) {
+              throw "github.repository is empty"
+            }
+            return $github.event_name
+      - name: Assert github context was accessible
+        env:
+          ACTUAL: ${{ steps.action.outputs.result }}
+          ERROR: ${{ steps.action.outputs.error }}
+        run: |
+          echo "actual result: $ACTUAL"
+          echo "error: $ERROR"
+          if [ -n "$ERROR" ]; then
+            echo "FAIL: script threw an error: $ERROR"
+            exit 1
+          fi
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: expected a non-empty event_name from github context"
+            exit 1
+          fi
+          echo "PASS: github context accessible, event_name=$ACTUAL"
