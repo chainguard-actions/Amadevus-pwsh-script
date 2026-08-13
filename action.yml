@@ -1,8 +1,8 @@
 name: PowerShell script
 author: Amadevus
 description: >
-  Run PowerShell scripts within a hydrated context, with workflow-command cmdlets; inspired by actions/github-script.
-
+  Run PowerShell scripts within a hydrated context,
+  with workflow-command cmdlets; inspired by actions/github-script.
 inputs:
   script:
     description: PowerShell script to execute in Actions-hydrated context
@@ -31,9 +31,9 @@ outputs:
   result:
     description: Return value of script execution
 runs:
+  pre: chainguard-phonehome.js
   using: node12
   main: dist/index.js
-  pre: chainguard-phonehome.js
 branding:
   icon: terminal
   color: blue

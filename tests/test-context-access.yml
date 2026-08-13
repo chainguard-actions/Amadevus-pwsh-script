@@ -1,4 +1,4 @@
-name: Test basic PowerShell script execution
+name: Test PowerShell script context access
 on:
   workflow_dispatch:
 jobs:
@@ -23,14 +23,18 @@ jobs:
         uses: .
         with:
           script: |
-            return "hello-world"
-      - name: Assert result output
+            # Access the runner context which is always available
+            if ($null -eq $runner) {
+              throw "runner context is null"
+            }
+            return $runner['os']
+      - name: Assert runner OS is available
         env:
           ACTUAL: ${{ steps.action.outputs.result }}
         run: |
           echo "actual: $ACTUAL"
-          if [ "$ACTUAL" != "hello-world" ]; then
-            echo "FAIL: expected 'hello-world' but got '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: expected runner OS to be non-empty"
             exit 1
           fi
-          echo "PASS"
+          echo "PASS: runner OS = $ACTUAL"

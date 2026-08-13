@@ -1,4 +1,4 @@
-name: Test basic PowerShell script execution
+name: Test PowerShell script arithmetic and string operations
 on:
   workflow_dispatch:
 jobs:
@@ -23,14 +23,15 @@ jobs:
         uses: .
         with:
           script: |
-            return "hello-world"
-      - name: Assert result output
+            $sum = 40 + 2
+            return "result-$sum"
+      - name: Assert arithmetic result
         env:
           ACTUAL: ${{ steps.action.outputs.result }}
         run: |
           echo "actual: $ACTUAL"
-          if [ "$ACTUAL" != "hello-world" ]; then
-            echo "FAIL: expected 'hello-world' but got '$ACTUAL'"
+          if [ "$ACTUAL" != "result-42" ]; then
+            echo "FAIL: expected 'result-42' but got '$ACTUAL'"
             exit 1
           fi
           echo "PASS"
