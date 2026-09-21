@@ -1,0 +1,41 @@
+name: Test error output on script exception
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install PowerShell
+        run: |
+          if ! command -v pwsh &>/dev/null; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y curl gnupg apt-transport-https
+            curl -sSL https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+            curl -sSL -o /tmp/packages-microsoft-prod.deb \
+              "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb" \
+              || curl -sSL -o /tmp/packages-microsoft-prod.deb \
+              "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb"
+            dpkg -i /tmp/packages-microsoft-prod.deb
+            apt-get update -qq
+            apt-get install -y powershell
+          fi
+          pwsh --version
+      - id: action
+        uses: .
+        # Allow the step to fail so we can inspect the error output
+        continue-on-error: true
+        with:
+          script: |
+            throw "intentional-test-error"
+      - name: Assert error output is populated
+        env:
+          ACTUAL_ERROR: ${{ steps.action.outputs.error }}
+        run: |
+          echo "actual error: $ACTUAL_ERROR"
+          if [ -z "$ACTUAL_ERROR" ]; then
+            echo "FAIL: expected error output to be non-empty when script throws"
+            exit 1
+          fi
+          echo "PASS: error output is populated"
