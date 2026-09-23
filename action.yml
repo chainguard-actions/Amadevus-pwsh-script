@@ -34,11 +34,11 @@ runs:
         curl "${args[@]}" \
           -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
           "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
-    - run: $env:ACTION_PATH/action.ps1
+    - run: |
+        & "$env:GITHUB_ACTION_PATH/action.ps1"
       id: script
       shell: pwsh
       env:
-        ACTION_PATH: ${{ github.action_path }}
         TEMP: ${{ runner.temp }}
         PWSH_SCRIPT_ACTION_TEXT: ${{ inputs.script }}
         PWSH_SCRIPT_ACTION_GITHUB: ${{ toJson(github) }}
